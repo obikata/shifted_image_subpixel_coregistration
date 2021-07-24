@@ -1,3 +1,7 @@
+
+# 64bit version of the program is also available in GitHub:
+# https://github.com/logicool-repo/shifted_image_subpixel_coregistration
+
 import numpy as np
 from scipy.fftpack import *
 import matplotlib.pyplot as plt
@@ -9,14 +13,7 @@ from sklearn.preprocessing import scale
 from mpl_toolkits.mplot3d import Axes3D
 import time
 
-def fft_coreg(master,slave):
-
-    # hunning
-    hy = np.hanning(master.shape[0])
-    hx = np.hanning(master.shape[1])
-    hw = hy.reshape(hy.shape[0],1) * hx
-    master = master * hw
-    slave = slave * hw
+def fft_coreg(master,slave,slave0):
 
     # fft2
     master_fd = fft2(master)
@@ -37,84 +34,16 @@ def fft_coreg(master,slave):
     # print(col_shift[0],row_shift[0])
 
     # shift by cmul and ifft
-    slave_fd_shift = slave_fd*np.exp(1j*2*np.pi*(-row_shift*Nr/nr-col_shift*Nc/nc))*np.exp(1j*diffphase)
-    slave_shift = ifft2(slave_fd_shift)
-    slave_shift = np.abs(slave_shift)
+    # slave_fd_shift = slave_fd*np.exp(1j*2*np.pi*(-row_shift*Nr/nr-col_shift*Nc/nc))*np.exp(1j*diffphase)
+    # slave_shift = ifft2(slave_fd_shift)
+    # slave_shift = np.abs(slave_shift)
 
     # shift by affine transform
-    # rows,cols = slave.shape
-    # M_coreg = np.float32([[1,0,col_shift],[0,1,row_shift]])
-    # slave_shift = cv2.warpAffine(slave,M_coreg,(cols,rows))
+    rows,cols = slave0.shape
+    M_coreg = np.float32([[1,0,col_shift],[0,1,row_shift]])
+    slave_shift = cv2.warpAffine(slave0,M_coreg,(cols,rows))
 
     return slave_shift, peak_map, col_shift[0], row_shift[0]
-
-def fft_coreg_logpol(master,slave):
-
-    M = master.shape[0]/np.log(master.shape[0])
-
-    # hunning
-    hy = np.hanning(master.shape[0])
-    hx = np.hanning(master.shape[1])
-    hw = hy.reshape(hy.shape[0],1) * hx
-    master = master * hw
-    slave = slave * hw
-
-    # fft2
-    master_fd = fft2(master)
-    slave_fd = fft2(slave)
-
-    # log-polar transform
-    master_fd_log = np.sqrt(fftshift(np.sqrt(np.abs(master_fd))))
-    slave_fd_log = np.sqrt(fftshift(np.sqrt(np.abs(slave_fd))))
-
-    master_lp = logpolar_func(master_fd_log,master_fd_log.shape[0],master_fd_log.shape[1],M)
-    slave_lp = logpolar_func(slave_fd_log,slave_fd_log.shape[0],slave_fd_log.shape[1],M)
-
-    plt.figure(figsize=(12, 6))
-    plt.subplot(1,2,1)
-    plt.imshow(np.uint8(master_lp/np.max(master_lp)*255),cmap='gray')
-    plt.subplot(1,2,2)
-    plt.imshow(np.uint8(slave_lp/np.max(slave_lp)*255),cmap='gray')
-    
-    master_fd_lp = fft2(master_lp[slice(int(master_lp.shape[0]/2-256),int(master_lp.shape[0]/2+256)),slice(int(master_lp.shape[1]/2-256),int(master_lp.shape[1]/2+256))])
-    slave_fd_lp = fft2(slave_lp[slice(int(master_lp.shape[0]/2-256),int(master_lp.shape[0]/2+256)),slice(int(master_lp.shape[1]/2-256),int(master_lp.shape[1]/2+256))])
-
-    master_nfd = master_fd_lp
-    slave_nfd = slave_fd_lp
-    
-    plt.figure(figsize=(12, 6))
-    plt.subplot(1,2,1)
-    plt.imshow(np.uint8(fftshift(np.abs(master_nfd)/np.max(np.abs(master_nfd)))*255),cmap='gray')
-    plt.subplot(1,2,2)
-    plt.imshow(np.uint8(fftshift(np.abs(slave_nfd)/np.max(np.abs(slave_nfd)))*255),cmap='gray')
-    plt.show()
-    
-    usfac = 100
-    output, Nc, Nr, peak_map = dftregistration(master_nfd,slave_nfd,usfac)
-
-    nr, nc = slave.shape
-    diffphase = output[1]
-    row_shift = output[2]
-    col_shift = output[3]
-
-    print(col_shift[0],row_shift[0])
-
-    # shift by cmul and ifft
-    slave_fd_shift = slave_fd*np.exp(1j*2*np.pi*(-row_shift*Nr/nr-col_shift*Nc/nc))*np.exp(1j*diffphase)
-    slave_shift = ifft2(slave_fd_shift)
-    slave_shift = np.abs(slave_shift)
-
-    # shift by affine transform
-    # rows,cols = slave.shape
-    # M_coreg = np.float32([[1,0,col_shift],[0,1,row_shift]])
-    # slave_shift = cv2.warpAffine(slave,M_coreg,(cols,rows))
-
-    return slave_shift, peak_map, col_shift[0], row_shift[0]
-
-def logpolar_func(src, h, w, magnitude_scale):
-    center = (int(h/2),int(w/2))
-    y = cv2.logPolar(src, center, magnitude_scale, cv2.WARP_FILL_OUTLIERS)
-    return np.asarray(y)
 
 def dftregistration(buf1ft,buf2ft,usfac):
 
@@ -229,10 +158,7 @@ def main():
     oArgs = oParser.parse_args()
     threshold = np.float32(oArgs.threshold)	# threshold
 
-    # default_shift = np.array([[45.3,28.2],[-28.9,-32.6],[-46.1,-28.5]])
-    # default_angle = np.array([45,45,45])
-    default_shift = np.array([[0,0],[0,0],[0,0]])
-    default_angle = np.array([60,0,0])
+    default_shift = np.array([[45.3,28.2],[-28.9,-32.6],[-46.1,-28.5]])
     sArrFilePath = glob.glob('lena\\' + '/*lena*.jpg')
     
     # load master image
@@ -257,7 +183,7 @@ def main():
     # master = master - adj_arr
     # master = master - np.min(master)
 
-    master_crop = master[slice(int(master.shape[0]/2-256),int(master.shape[0]/2+256)),slice(int(master.shape[0]/2-256),int(master.shape[0]/2+256))]
+    master_crop = master[slice(800,1200),slice(800,1200)]
     
     i = 0
 
@@ -287,17 +213,14 @@ def main():
         # slave = slave - np.min(slave)
             
         # randomly shift slave image
+        # M = np.float32([[1,0,10*np.random.rand(1)-5],[0,1,10*np.random.rand(1)-5]])
         M = np.float32([[1,0,default_shift[i,0]],[0,1,default_shift[i,1]]])
         slave = cv2.warpAffine(slave,M,(cols,rows))
-
-        # randomly rotate slave image
-        center = tuple(np.array(slave.shape[0:2])/2)
-        rotMat = cv2.getRotationMatrix2D(center, default_angle[i], 1.0)
-        slave = cv2.warpAffine(slave, rotMat, slave.shape[0:2], flags=cv2.INTER_LINEAR)
-
+        
+        # print(M[0,2],M[1,2])
         i = i + 1
         
-        slave_crop = slave[slice(int(master.shape[0]/2-256),int(master.shape[0]/2+256)),slice(int(master.shape[0]/2-256),int(master.shape[0]/2+256))]
+        slave_crop = slave[slice(800,1200),slice(800,1200)]
         
         # plot blurred images
         img = np.uint8((master_crop+slave_crop)/np.max((master_crop+slave_crop))*255)
@@ -343,16 +266,14 @@ def main():
         
         start = time.time()
 
-        slave_rot, peak_map, col_shift, row_shift = fft_coreg_logpol(master_crop,slave_crop)
-
-        # shift coregistration
-        slave_shift, peak_map, col_shift, row_shift = fft_coreg(master,slave_rot)
+        # master&slave coregistration
+        slave_shift, peak_map, col_shift, row_shift = fft_coreg(master_crop,slave_crop,slave)
         
         elapsed_time = time.time() - start
         print ("elapsed_time:{0}".format(elapsed_time) + "[sec]")
 
         # crop slave_shift
-        slave_shift_crop = slave_shift[slice(int(master.shape[0]/2-256),int(master.shape[0]/2+256)),slice(int(master.shape[0]/2-256),int(master.shape[0]/2+256))]
+        slave_shift_crop = slave_shift[slice(800,1200),slice(800,1200)]
 
         # check image stacked
         img = np.uint8((master_crop+slave_shift_crop)/np.max((master_crop+slave_shift_crop))*255)
@@ -400,7 +321,7 @@ def main():
     peak_map = np.roll(peak_map,-int(col_shift),axis=1)
     m,n = peak_map.shape
     peak_map = peak_map[slice(int(m/2-100),int(m/2+100)),slice(int(n/2-100),int(n/2+100))]
-    plt.figure(figsize=(9, 9))
+    plt.figure(figsize=(6, 6))
     img = np.uint8(peak_map/np.max(peak_map)*255)
 
     label_text = 'row_shift=' + "{0:.2f}".format(-col_shift)
