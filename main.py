@@ -1,28 +1,56 @@
 import numpy as np
-from scipy.fftpack import *
-import matplotlib.pyplot as plt
 import cv2
-import argparse
-import glob
-import os
-from sklearn.preprocessing import scale
+import matplotlib.pyplot as plt
+from numpy.fft import *
 from mpl_toolkits.mplot3d import Axes3D
-import time
 
-def fft_coreg(master,slave):
+def fft_coreg_trans(master,slave):
 
-    # hunning
-    hy = np.hanning(master.shape[0])
-    hx = np.hanning(master.shape[1])
-    hw = hy.reshape(hy.shape[0],1) * hx
-    master = master * hw
-    slave = slave * hw
+    ## hunning
+    # hy = np.hanning(master.shape[0])
+    # hx = np.hanning(master.shape[1])
+    # hw = hy.reshape(hy.shape[0],1) * hx
+    # master = master * hw
+    # slave = slave * hw
 
-    # fft2
+    ## fft2
     master_fd = fft2(master)
     slave_fd = fft2(slave)
 
-    # normalization
+    ## normalization
+    master_nfd = master_fd/np.abs(master_fd)
+    slave_nfd = slave_fd/np.abs(slave_fd)
+
+    ## shift estimation
+    usfac = 100
+    output, Nc, Nr, peak_map = dftregistration(master_nfd,slave_nfd,usfac)
+
+    nr, nc = slave.shape
+    diffphase = output[1]
+    row_shift = output[2]
+    col_shift = output[3]
+
+    ## coregistration
+    slave_fd_crg = slave_fd*np.exp(1j*2*np.pi*(-row_shift*Nr/nr-col_shift*Nc/nc))*np.exp(1j*diffphase)
+    slave_crg = ifft2(slave_fd_crg)
+    slave_crg = np.abs(slave_crg)
+
+    return row_shift[0], col_shift[0], peak_map, slave_crg
+
+def fft_coreg_LP(master,slave):
+
+    # hunning
+    # hy = np.hanning(master.shape[0])
+    # hx = np.hanning(master.shape[1])
+    # hw = hy.reshape(hy.shape[0],1) * hx
+    # master = master * hw
+    # slave = slave * hw
+
+    ## fft2
+    master_fd = fft2(master)
+    slave_fd = fft2(slave)
+
+    ## normalization
     master_nfd = master_fd/np.abs(master_fd)
     slave_nfd = slave_fd/np.abs(slave_fd)
 
@@ -34,87 +62,7 @@ def fft_coreg(master,slave):
     row_shift = output[2]
     col_shift = output[3]
 
-    # print(col_shift[0],row_shift[0])
-
-    # shift by cmul and ifft
-    slave_fd_shift = slave_fd*np.exp(1j*2*np.pi*(-row_shift*Nr/nr-col_shift*Nc/nc))*np.exp(1j*diffphase)
-    slave_shift = ifft2(slave_fd_shift)
-    slave_shift = np.abs(slave_shift)
-
-    # shift by affine transform
-    # rows,cols = slave.shape
-    # M_coreg = np.float32([[1,0,col_shift],[0,1,row_shift]])
-    # slave_shift = cv2.warpAffine(slave,M_coreg,(cols,rows))
-
-    return slave_shift, peak_map, col_shift[0], row_shift[0]
-
-def fft_coreg_logpol(master,slave):
-
-    M = master.shape[0]/np.log(master.shape[0])
-
-    # hunning
-    hy = np.hanning(master.shape[0])
-    hx = np.hanning(master.shape[1])
-    hw = hy.reshape(hy.shape[0],1) * hx
-    master = master * hw
-    slave = slave * hw
-
-    # fft2
-    master_fd = fft2(master)
-    slave_fd = fft2(slave)
-
-    # log-polar transform
-    master_fd_log = np.sqrt(fftshift(np.sqrt(np.abs(master_fd))))
-    slave_fd_log = np.sqrt(fftshift(np.sqrt(np.abs(slave_fd))))
-
-    master_lp = logpolar_func(master_fd_log,master_fd_log.shape[0],master_fd_log.shape[1],M)
-    slave_lp = logpolar_func(slave_fd_log,slave_fd_log.shape[0],slave_fd_log.shape[1],M)
-
-    plt.figure(figsize=(12, 6))
-    plt.subplot(1,2,1)
-    plt.imshow(np.uint8(master_lp/np.max(master_lp)*255),cmap='gray')
-    plt.subplot(1,2,2)
-    plt.imshow(np.uint8(slave_lp/np.max(slave_lp)*255),cmap='gray')
-    
-    master_fd_lp = fft2(master_lp[slice(int(master_lp.shape[0]/2-256),int(master_lp.shape[0]/2+256)),slice(int(master_lp.shape[1]/2-256),int(master_lp.shape[1]/2+256))])
-    slave_fd_lp = fft2(slave_lp[slice(int(master_lp.shape[0]/2-256),int(master_lp.shape[0]/2+256)),slice(int(master_lp.shape[1]/2-256),int(master_lp.shape[1]/2+256))])
-
-    master_nfd = master_fd_lp
-    slave_nfd = slave_fd_lp
-    
-    plt.figure(figsize=(12, 6))
-    plt.subplot(1,2,1)
-    plt.imshow(np.uint8(fftshift(np.abs(master_nfd)/np.max(np.abs(master_nfd)))*255),cmap='gray')
-    plt.subplot(1,2,2)
-    plt.imshow(np.uint8(fftshift(np.abs(slave_nfd)/np.max(np.abs(slave_nfd)))*255),cmap='gray')
-    plt.show()
-    
-    usfac = 100
-    output, Nc, Nr, peak_map = dftregistration(master_nfd,slave_nfd,usfac)
-
-    nr, nc = slave.shape
-    diffphase = output[1]
-    row_shift = output[2]
-    col_shift = output[3]
-
-    print(col_shift[0],row_shift[0])
-
-    # shift by cmul and ifft
-    slave_fd_shift = slave_fd*np.exp(1j*2*np.pi*(-row_shift*Nr/nr-col_shift*Nc/nc))*np.exp(1j*diffphase)
-    slave_shift = ifft2(slave_fd_shift)
-    slave_shift = np.abs(slave_shift)
-
-    # shift by affine transform
-    # rows,cols = slave.shape
-    # M_coreg = np.float32([[1,0,col_shift],[0,1,row_shift]])
-    # slave_shift = cv2.warpAffine(slave,M_coreg,(cols,rows))
-
-    return slave_shift, peak_map, col_shift[0], row_shift[0]
-
-def logpolar_func(src, h, w, magnitude_scale):
-    center = (int(h/2),int(w/2))
-    y = cv2.logPolar(src, center, magnitude_scale, cv2.WARP_FILL_OUTLIERS)
-    return np.asarray(y)
+    return row_shift[0], col_shift[0], peak_map
 
 def dftregistration(buf1ft,buf2ft,usfac):
 
@@ -123,60 +71,69 @@ def dftregistration(buf1ft,buf2ft,usfac):
     Nc = ifftshift(np.arange(-np.fix(nc/2),np.ceil(nc/2)))
 
     if usfac == 0:
-        # Simple computation of error and phase difference without registration
+
+        ## Simple computation of error and phase difference without registration
         CCmax = np.sum(buf1ft*np.conjugate(buf2ft))
         row_shift = 0
         col_shift = 0
+
     elif usfac == 1:
-        # Single pixel registration
+
+        ## Single pixel registration
         CC = ifft2(buf1ft*np.conjugate(buf2ft))
         CCabs = np.abs(CC)
         row_shift, col_shift = np.where(CCabs == np.max(CCabs))
         CCmax = CC[row_shift,col_shift]*nr*nc
-        # Now change shifts so that they represent relative shifts and not indices
+
+        ## Now change shifts so that they represent relative shifts and not indices
         row_shift = Nr[row_shift]
         col_shift = Nc[col_shift]
     elif usfac > 1:
-        # Start with usfac == 2
+
+        ## Start with usfac == 2
         CC = ifft2(FTpad(buf1ft*np.conjugate(buf2ft),(2*nr,2*nc)))
         CCabs = np.abs(CC)
         
-        ##
+        ## generate peak map
         row_shift, col_shift = np.where(CCabs == np.max(CCabs))
         peak_map = ifftshift(CCabs)
         peak_map = np.roll(peak_map,-row_shift,axis=0)
         peak_map = np.roll(peak_map,-col_shift,axis=1)
-        ##
         
-        # row_shift, col_shift = row_shift[0], col_shift[0]
+        ## row_shift, col_shift = row_shift[0], col_shift[0]
         CCmax = CC[row_shift,col_shift]*nr*nc
-        # Now change shifts so that they represent relative shifts and not indices
+
+        ## Now change shifts so that they represent relative shifts and not indices
         Nr2 = ifftshift(np.arange(-np.fix(nr),np.ceil(nr)))
         Nc2 = ifftshift(np.arange(-np.fix(nc),np.ceil(nc)))
         row_shift = Nr2[row_shift]/2
         col_shift = Nc2[col_shift]/2
 
-        # If upsampling > 2, then refine estimate with matrix multiply DFT
+        ## If upsampling > 2, then refine estimate with matrix multiply DFT
         if usfac > 2:
-            ### DFT computation ###
-            # Initial shift estimate in upsampled grid
+
+            ## DFT computation
+
+            ## Initial shift estimate in upsampled grid
             row_shift = np.round(row_shift*usfac)/usfac
             col_shift = np.round(col_shift*usfac)/usfac
             dftshift = np.fix(np.ceil(usfac*1.5)/2) ## Center of output array at dftshift+1
-            # Matrix multiply DFT around the current shift estimate
+
+            ## Matrix multiply DFT around the current shift estimate
             CC = np.conjugate(dftups(buf2ft*np.conjugate(buf1ft),np.ceil(usfac*1.5),np.ceil(usfac*1.5),usfac,dftshift-row_shift*usfac,dftshift-col_shift*usfac))
-            # Locate maximum and map back to original pixel grid 
+
+            ## Locate maximum and map back to original pixel grid 
             CCabs = np.abs(CC)
             rloc, cloc = np.where(CCabs == np.max(CCabs))
-            # rloc, cloc = rloc[0], cloc[0]
+
+            ## rloc, cloc = rloc[0], cloc[0]
             CCmax = CC[rloc,cloc]
             rloc = rloc - dftshift
             cloc = cloc - dftshift
             row_shift = row_shift + rloc/usfac
             col_shift = col_shift + cloc/usfac
 
-        # If its only one row or column the mportift along that dimension has no
-        # effect. Set to zero.
+        ## If its only one row or column the mportift along that dimension has no effect. Set to zero.
         if nr == 1:
             row_shift = 0
 
@@ -199,7 +156,7 @@ def dftups(in_arr,nor,noc,usfac,roff,coff):
 
     nr,nc=in_arr.shape
 
-    # Compute kernels and obtain DFT by matrix products
+    ## Compute kernels and obtain DFT by matrix products
     kernc=np.exp((-1j*2*np.pi/(nc*usfac))*( ifftshift(np.arange(0,nc)[:, np.newaxis]) - np.floor(nc/2) )*( np.arange(0,noc) - coff ))
     kernr=np.exp((-1j*2*np.pi/(nr*usfac))*( np.arange(0,nor)[:, np.newaxis] - roff )*( ifftshift(np.arange(0,nr)) - np.floor(nr/2)  ))
 
@@ -223,225 +180,178 @@ def FTpad(imFT,outsize):
 
     return imFTout
 
+def logpolar_module(f,g,mag_scale):
+
+    row = f.shape[0]; col = f.shape[1] # row & col size
+    hrow = int(row/2); hcol = int(col/2)
+
+    ## hanning window
+    hy = np.hanning(row)
+    hx = np.hanning(col)
+    hw = hy.reshape(row, 1) * hx.reshape(1, col)
+    f = f * hw
+    g = g * hw
+
+    # fft
+    F = fftshift(fft2(f))
+    G = fftshift(fft2(g))
+
+    # highpass filter
+    X1 = np.cos(np.pi*(np.arange(row)/row-0.5))
+    X2 = np.cos(np.pi*(np.arange(col)/col-0.5))
+    X1 = np.reshape(X1,(row,1))
+    X2 = np.reshape(X2,(1,col))
+    X1 = np.tile(X1,(1,col))
+    X2 = np.tile(X2,(row,1))
+    X = X1*X2
+    H = (1.0-X)*(2.0-X)
+    F = H * F
+    G = H * G
+
+    ## Log-Polar transform
+    F = np.abs(F)
+    G = np.abs(G)
+    FLP = cv2.logPolar(F, (F.shape[0]/2, F.shape[1]/2), mag_scale, cv2.INTER_LANCZOS4)
+    GLP = cv2.logPolar(G, (G.shape[0]/2, G.shape[1]/2), mag_scale, cv2.INTER_LANCZOS4)
+
+    ## roll and slice
+    FLP = np.roll(FLP,int(hcol),axis=1)
+    GLP = np.roll(GLP,int(hcol),axis=1)
+    FLP = FLP[slice(int(hrow)),slice(int(hcol))]
+    GLP = GLP[slice(int(hrow)),slice(int(hcol))]
+
+    return FLP, GLP
+
 def main():
-    oParser = argparse.ArgumentParser()
-    oParser.add_argument('--threshold', '-th', default=5,help='')
-    oArgs = oParser.parse_args()
-    threshold = np.float32(oArgs.threshold)	# threshold
 
-    # default_shift = np.array([[45.3,28.2],[-28.9,-32.6],[-46.1,-28.5]])
-    # default_angle = np.array([45,45,45])
-    default_shift = np.array([[0,0],[0,0],[0,0]])
-    default_angle = np.array([60,0,0])
-    sArrFilePath = glob.glob('lena\\' + '/*lena*.jpg')
+    ## set slave shift/rotate/scale values
+    trans_true = [2,-5]
+    angle_true = 30
+    scale_true = 1.05
+    mag_scale = 100
+
+    ## load master and slave images
+    img_dir = 'lena/'
+    f = np.asarray(cv2.imread(img_dir+'lena512.png',0),dtype=np.float64)
+    g = np.asarray(cv2.imread(img_dir+'lena512.png',0),dtype=np.float64)
+    f = f[slice(512),slice(512)]
+    g = g[slice(512),slice(512)]
+
+    row = f.shape[0]; col = f.shape[1] # row & col size
+    hrow = int(row/2); hcol = int(col/2)
+    center = tuple(np.array(f.shape)/2)
+
+    ## translate slave
+    transMat = np.float32([[1,0,trans_true[0]],[0,1,trans_true[1]]])
+    g = cv2.warpAffine(g,transMat,(col,row))
+
+    ## scale slave
+    g_tmp = cv2.resize(g,None,fx=scale_true,fy=scale_true, interpolation = cv2.INTER_LANCZOS4)
+    row_pad = int(g_tmp.shape[0]/2 - 512/2)
+    col_pad = int(g_tmp.shape[1]/2 - 512/2)
     
-    # load master image
-    sFileName = os.path.basename(sArrFilePath[0])
-    sTmpFileName_master, sTmpExt = os.path.splitext(sFileName)
-    master = cv2.imread('lena\\' + sTmpFileName_master + '.jpg',0)
-    master = np.float32(master)/255*(2**16-1)
+    g = g*0
+    if scale_true < 1.0:
+        row_tmp = g_tmp.shape[0]; col_tmp = g_tmp.shape[1] # row & col size
+        hrow_tmp = np.floor(row_tmp/2); hcol_tmp = np.floor(col_tmp/2)
+        if row_tmp % 2 == 0:
+            row_slice = slice(int(center[0]-hrow_tmp),int(center[0]+hrow_tmp))
+            col_slice = slice(int(center[1]-hcol_tmp),int(center[1]+hcol_tmp))
+        else:
+            row_slice = slice(int(center[0]-hrow_tmp),int(center[0]+hrow_tmp+1))
+            col_slice = slice(int(center[1]-hcol_tmp),int(center[1]+hcol_tmp+1))
+        g[row_slice,col_slice] = g_tmp
+    else:
+        row_tmp = g_tmp.shape[0]; col_tmp = g_tmp.shape[1] # row & col size
+        if row_tmp % 2 == 0:
+            center_tmp = np.array(g_tmp.shape)/2
+            row_slice = slice(int(center_tmp[0]-hrow),int(center_tmp[0]+hrow))
+            col_slice = slice(int(center_tmp[1]-hcol),int(center_tmp[1]+hcol))
+        else:
+            center_tmp = np.floor(np.array(g_tmp.shape)/2)
+            row_slice = slice(int(center_tmp[0]-hrow),int(center_tmp[0]+hrow))
+            col_slice = slice(int(center_tmp[1]-hcol),int(center_tmp[1]+hcol))
+        g = g_tmp[row_slice,col_slice]
 
-    # # adjust background level of each channel
-    # rows,cols = master.shape
-    # blv_ch0 = np.median(master[slice(int(rows/2)),slice(int(cols/2))])
-    # blv_ch1 = np.median(master[slice(int(rows/2),rows),slice(int(cols/2))])
-    # blv_ch2 = np.median(master[slice(int(rows/2)),slice(int(cols/2),cols)])
-    # blv_ch3 = np.median(master[slice(int(rows/2),rows),slice(int(cols/2),cols)])
+    ## rotate slave
+    rotMat = cv2.getRotationMatrix2D(center, angle_true, 1.0)
+    g = cv2.warpAffine(g, rotMat, g.shape, flags=cv2.INTER_LANCZOS4)
 
-    # adj_arr = np.zeros_like(master).astype(np.float32)
-    # adj_arr[slice(int(rows/2)),slice(int(cols/2))] = blv_ch0 - blv_ch0
-    # adj_arr[slice(int(rows/2),rows),slice(int(cols/2))] = blv_ch1 - blv_ch0
-    # adj_arr[slice(int(rows/2)),slice(int(cols/2),cols)] = blv_ch2 - blv_ch0
-    # adj_arr[slice(int(rows/2),rows),slice(int(cols/2),cols)] = blv_ch3 - blv_ch0
+    ## Fourier log-magnitude spectra mapping in Log-Polar plane 
+    FLP, GLP = logpolar_module(f,g,mag_scale)
 
-    # master = master - adj_arr
-    # master = master - np.min(master)
+    ## estimate angle & scale
+    row_shift, col_shift, peak_map = fft_coreg_LP(FLP,GLP)
+    angle_est = - row_shift/(hrow) * 180
+    scale_est = 1.0 - col_shift/mag_scale
 
-    master_crop = master[slice(int(master.shape[0]/2-256),int(master.shape[0]/2+256)),slice(int(master.shape[0]/2-256),int(master.shape[0]/2+256))]
-    
-    i = 0
+    ## rotate slave
+    rotMat = cv2.getRotationMatrix2D(center, angle_est, 1.0)
+    g_coreg = cv2.warpAffine(g, rotMat, g.shape, flags=cv2.INTER_LANCZOS4)
 
-    for sFilePath in sArrFilePath[1:len(sArrFilePath)]:
+    ## scale slave
+    g_coreg_tmp = cv2.resize(g_coreg,None,fx=scale_est,fy=scale_est, interpolation = cv2.INTER_LANCZOS4)
+    row_coreg_tmp = g_coreg_tmp.shape[0]; col_coreg_tmp = g_coreg_tmp.shape[1]
+    g_coreg = np.zeros((row,col))
+    if row_coreg_tmp == row:
+        g_coreg = g_coreg_tmp
+    elif row_coreg_tmp > row:
+        g_coreg = g_coreg_tmp[slice(row),slice(col)]
+    else:
+        g_coreg[slice(row_coreg_tmp),slice(col_coreg_tmp)] = g_coreg_tmp
 
-        # load slave image
-        sFileName = os.path.basename(sFilePath)
-        sTmpFileName_slave, sTmpExt = os.path.splitext(sFileName)
-        slave = cv2.imread('lena\\' + sTmpFileName_master + '.jpg',0)
-        slave = np.float32(slave)/255*(2**16-1)
+    ## estimate translation & translate slave
+    row_shift, col_shift, peak_map, g_coreg = fft_coreg_trans(f,g_coreg)
 
-        rows,cols = slave.shape
+    ## check estimates
+    print('x_shift = ' + str(col_shift-col_pad))
+    print('y_shift = ' + str(row_shift-row_pad))
+    print('rotate angle = ' + str(angle_est))
+    print('scale = ' + str(scale_est))
 
-        # # adjust background level of each channel
-        # blv_ch0 = np.median(slave[slice(int(rows/2)),slice(int(cols/2))])
-        # blv_ch1 = np.median(slave[slice(int(rows/2),rows),slice(int(cols/2))])
-        # blv_ch2 = np.median(slave[slice(int(rows/2)),slice(int(cols/2),cols)])
-        # blv_ch3 = np.median(slave[slice(int(rows/2),rows),slice(int(cols/2),cols)])
-
-        # adj_arr = np.zeros_like(slave).astype(np.float32)
-        # adj_arr[slice(int(rows/2)),slice(int(cols/2))] = blv_ch0 - blv_ch0
-        # adj_arr[slice(int(rows/2),rows),slice(int(cols/2))] = blv_ch1 - blv_ch0
-        # adj_arr[slice(int(rows/2)),slice(int(cols/2),cols)] = blv_ch2 - blv_ch0
-        # adj_arr[slice(int(rows/2),rows),slice(int(cols/2),cols)] = blv_ch3 - blv_ch0
-
-        # slave = slave - adj_arr
-        # slave = slave - np.min(slave)
-            
-        # randomly shift slave image
-        M = np.float32([[1,0,default_shift[i,0]],[0,1,default_shift[i,1]]])
-        slave = cv2.warpAffine(slave,M,(cols,rows))
-
-        # randomly rotate slave image
-        center = tuple(np.array(slave.shape[0:2])/2)
-        rotMat = cv2.getRotationMatrix2D(center, default_angle[i], 1.0)
-        slave = cv2.warpAffine(slave, rotMat, slave.shape[0:2], flags=cv2.INTER_LINEAR)
-
-        i = i + 1
-        
-        slave_crop = slave[slice(int(master.shape[0]/2-256),int(master.shape[0]/2+256)),slice(int(master.shape[0]/2-256),int(master.shape[0]/2+256))]
-        
-        # plot blurred images
-        img = np.uint8((master_crop+slave_crop)/np.max((master_crop+slave_crop))*255)
-        plt.figure(figsize=(12, 6))
-        plt.subplot(1,2,1)
-        
-        label_text = 'row_shift=' + "{0:.2f}".format(M[0,2])
-        bottomLeftCornerOfText = (10,30)
-        font                   = cv2.FONT_HERSHEY_SIMPLEX
-        fontScale              = 0.8
-        fontColor              = (255,255,255)
-        thickness              = 1
-        lineType               = cv2.LINE_AA
-
-        cv2.putText(img, label_text, 
-            bottomLeftCornerOfText, 
-            font, 
-            fontScale,
-            fontColor,
-            thickness,
-            lineType)
-
-        label_text = 'col_shift=' + "{0:.2f}".format(M[1,2])
-        bottomLeftCornerOfText = (10,60)
-        font                   = cv2.FONT_HERSHEY_SIMPLEX
-        fontScale              = 0.8
-        fontColor              = (255,255,255)
-        thickness              = 1
-        lineType               = cv2.LINE_AA
-
-        cv2.putText(img, label_text, 
-            bottomLeftCornerOfText, 
-            font, 
-            fontScale,
-            fontColor,
-            thickness,
-            lineType)
-
-        plt.imshow(img,cmap='gray')
-        plt.title(sTmpFileName_master + ' + ' + sTmpFileName_slave + ' (BLURRED)')
-        plt.xlabel('x')
-        plt.ylabel('y')
-        
-        start = time.time()
-
-        slave_rot, peak_map, col_shift, row_shift = fft_coreg_logpol(master_crop,slave_crop)
-
-        # shift coregistration
-        slave_shift, peak_map, col_shift, row_shift = fft_coreg(master,slave_rot)
-        
-        elapsed_time = time.time() - start
-        print ("elapsed_time:{0}".format(elapsed_time) + "[sec]")
-
-        # crop slave_shift
-        slave_shift_crop = slave_shift[slice(int(master.shape[0]/2-256),int(master.shape[0]/2+256)),slice(int(master.shape[0]/2-256),int(master.shape[0]/2+256))]
-
-        # check image stacked
-        img = np.uint8((master_crop+slave_shift_crop)/np.max((master_crop+slave_shift_crop))*255)
-        plt.subplot(1,2,2)
-
-        label_text = 'row_shift=' + "{0:.2f}".format(col_shift) + ' (err=' + "{0:.2f}".format(col_shift+M[0,2]) + ')'
-        bottomLeftCornerOfText = (10,30)
-        font                   = cv2.FONT_HERSHEY_SIMPLEX
-        fontScale              = 0.8
-        fontColor              = (255,255,255)
-        thickness              = 1
-        lineType               = cv2.LINE_AA
-
-        cv2.putText(img, label_text, 
-            bottomLeftCornerOfText, 
-            font, 
-            fontScale,
-            fontColor,
-            thickness,
-            lineType)
-
-        label_text = 'col_shift=' + "{0:.2f}".format(row_shift) + ' (err=' + "{0:.2f}".format(row_shift+M[1,2]) + ')'
-        bottomLeftCornerOfText = (10,60)
-        font                   = cv2.FONT_HERSHEY_SIMPLEX
-        fontScale              = 0.8
-        fontColor              = (255,255,255)
-        thickness              = 1
-        lineType               = cv2.LINE_AA
-
-        cv2.putText(img, label_text, 
-            bottomLeftCornerOfText, 
-            font,
-            fontScale,
-            fontColor,
-            thickness,
-            lineType)
-
-        plt.imshow(img,cmap='gray')
-        plt.title(sTmpFileName_master + ' + ' + sTmpFileName_slave + ' (COREGISTERED)')
-        plt.xlabel('x')
-        plt.ylabel('y')
-
-    # plot peak row-wise/col-wise
-    peak_map = np.roll(peak_map,-int(row_shift),axis=0)
-    peak_map = np.roll(peak_map,-int(col_shift),axis=1)
-    m,n = peak_map.shape
-    peak_map = peak_map[slice(int(m/2-100),int(m/2+100)),slice(int(n/2-100),int(n/2+100))]
-    plt.figure(figsize=(9, 9))
-    img = np.uint8(peak_map/np.max(peak_map)*255)
-
-    label_text = 'row_shift=' + "{0:.2f}".format(-col_shift)
-    bottomLeftCornerOfText = (5,170)
-    font                   = cv2.FONT_HERSHEY_SIMPLEX
-    fontScale              = 0.6
-    fontColor              = (255,255,255)
-    thickness              = 1
-    lineType               = cv2.LINE_AA
-
-    cv2.putText(img, label_text, 
-        bottomLeftCornerOfText, 
-        font, 
-        fontScale,
-        fontColor,
-        thickness,
-        lineType)
-
-    label_text = 'col_shift=' + "{0:.2f}".format(-row_shift)
-    bottomLeftCornerOfText = (5,190)
-    font                   = cv2.FONT_HERSHEY_SIMPLEX
-    fontScale              = 0.6
-    fontColor              = (255,255,255)
-    thickness              = 1
-    lineType               = cv2.LINE_AA
-
-    cv2.putText(img, label_text, 
-        bottomLeftCornerOfText, 
-        font,
-        fontScale,
-        fontColor,
-        thickness,
-        lineType)
-
-    plt.imshow(img,cmap='gray',extent=[-100,99,99,-100])
-    plt.title('estimated shift')
+    ## plot figures
+    fig = plt.figure(figsize=(14,7))
+    ax = fig.add_subplot(121)
+    plt.imshow(np.uint8(np.abs(f)), cmap=plt.get_cmap('gray'))
+    plt.title('master')
     plt.xlabel('x')
     plt.ylabel('y')
+    ax = fig.add_subplot(122)
+    plt.imshow(np.uint8(np.abs(g)), cmap=plt.get_cmap('gray'))
+    plt.title('slave')
+    plt.xlabel('x')
+    plt.ylabel('y')
+
+    fig = plt.figure(figsize=(14,7))
+    ax = fig.add_subplot(121)
+    plt.imshow(np.uint8(np.abs(f-g)), cmap=plt.get_cmap('gray'))
+    plt.title('master-slave (unregistered)')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    ax.annotate('dx = ' + str(trans_true[0]) + ',' + 'dy = ' + str(trans_true[1]) + '\n'
+            'rotation = ' + str(angle_true) + ' (deg)' + '\n'
+            'scale = ' + str(scale_true),
+            xy=(1, 0), xycoords='axes fraction',
+            xytext=(-20, 20), textcoords='offset pixels',
+            horizontalalignment='right',
+            verticalalignment='bottom',
+            bbox=dict(boxstyle="round", fc="w"))
+
+    ax = fig.add_subplot(122)
+    plt.imshow(np.uint8(np.abs(f-g_coreg)), cmap=plt.get_cmap('gray'))
+    plt.title('master-slave (registered)')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    ax.annotate('dx = ' + str(round(col_shift-col_pad,2)) + ',' + 'dy = ' + str(round(row_shift-row_pad,2)) + '\n'
+            'rotation = ' + str(round(angle_est,2)) + ' (deg)' + '\n'
+            'scale = ' + str(round(scale_est,4)),
+            xy=(1, 0), xycoords='axes fraction',
+            xytext=(-20, 20), textcoords='offset pixels',
+            horizontalalignment='right',
+            verticalalignment='bottom',
+            bbox=dict(boxstyle="round", fc="w"))
 
     plt.show()
 
 if __name__ == '__main__':
-
     main()
