@@ -40,7 +40,7 @@ def fft_coreg(master,slave,slave0):
 
     # shift by affine transform
     rows,cols = slave0.shape
-    M_coreg = np.float32([[1,0,col_shift],[0,1,row_shift]])
+    M_coreg = np.array([[1,0,col_shift[0]],[0,1,row_shift[0]]])
     slave_shift = cv2.warpAffine(slave0,M_coreg,(cols,rows))
 
     return slave_shift, peak_map, col_shift[0], row_shift[0]
@@ -159,12 +159,12 @@ def main():
     threshold = np.float32(oArgs.threshold)	# threshold
 
     default_shift = np.array([[45.3,28.2],[-28.9,-32.6],[-46.1,-28.5]])
-    sArrFilePath = glob.glob('lena\\' + '/*lena*.jpg')
+    sArrFilePath = glob.glob('lena/' + '/*lena*.jpg')
     
     # load master image
     sFileName = os.path.basename(sArrFilePath[0])
     sTmpFileName_master, sTmpExt = os.path.splitext(sFileName)
-    master = cv2.imread('lena\\' + sTmpFileName_master + '.jpg',0)
+    master = cv2.imread('lena/' + sTmpFileName_master + '.jpg',0)
     master = np.float32(master)/255*(2**16-1)
 
     # # adjust background level of each channel
@@ -192,7 +192,7 @@ def main():
         # load slave image
         sFileName = os.path.basename(sFilePath)
         sTmpFileName_slave, sTmpExt = os.path.splitext(sFileName)
-        slave = cv2.imread('lena\\' + sTmpFileName_master + '.jpg',0)
+        slave = cv2.imread('lena/' + sTmpFileName_master + '.jpg',0)
         slave = np.float32(slave)/255*(2**16-1)
 
         rows,cols = slave.shape
