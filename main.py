@@ -233,12 +233,12 @@ def main():
     # default_angle = np.array([45,45,45])
     default_shift = np.array([[0,0],[0,0],[0,0]])
     default_angle = np.array([60,0,0])
-    sArrFilePath = glob.glob('lena\\' + '/*lena*.jpg')
+    sArrFilePath = glob.glob('lena/' + '/*lena*.jpg')
     
     # load master image
     sFileName = os.path.basename(sArrFilePath[0])
     sTmpFileName_master, sTmpExt = os.path.splitext(sFileName)
-    master = cv2.imread('lena\\' + sTmpFileName_master + '.jpg',0)
+    master = cv2.imread('lena/' + sTmpFileName_master + '.jpg',0)
     master = np.float32(master)/255*(2**16-1)
 
     # # adjust background level of each channel
@@ -266,7 +266,7 @@ def main():
         # load slave image
         sFileName = os.path.basename(sFilePath)
         sTmpFileName_slave, sTmpExt = os.path.splitext(sFileName)
-        slave = cv2.imread('lena\\' + sTmpFileName_master + '.jpg',0)
+        slave = cv2.imread('lena/' + sTmpFileName_master + '.jpg',0)
         slave = np.float32(slave)/255*(2**16-1)
 
         rows,cols = slave.shape
